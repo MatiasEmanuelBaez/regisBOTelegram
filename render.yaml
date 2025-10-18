@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: telegram-expense-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: Bolt Database_URL
+        sync: false
+      - key: Bolt Database_SERVICE_ROLE_KEY
+        sync: false
