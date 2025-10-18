@@ -3,7 +3,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
 import { getOrCreateUser } from './src/services/userService.js';
 import { getAllCategories, classifyExpense } from './src/services/categoryService.js';
-import { getUserPaymentMethods, findPaymentMethodByName } from './src/services/paymentMethodService.js';
+import { getPaymentMethods, findPaymentMethodByName } from './src/services/paymentMethodService.js';
 import { createExpense, getRecentExpenses, getMonthlyTotal, getCategoryTotals, getPaymentMethodTotals } from './src/services/expenseService.js';
 import { parseExpenseMessage, formatCurrency } from './src/utils/parser.js';
 
@@ -96,8 +96,7 @@ Simplemente envía un mensaje describiendo tu gasto:
 
     // Comando /metodos
     if (text === '/metodos') {
-      const user = await getOrCreateUser(msg.from);
-      const methods = await getUserPaymentMethods(user.id);
+      const methods = await getPaymentMethods();
       let message = '💳 *Medios de pago disponibles:*\n\n';
       methods.forEach(method => {
         message += `${method.icon} ${method.name}\n`;
@@ -267,3 +266,4 @@ app.get('/setup-webhook', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
