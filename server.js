@@ -12,52 +12,45 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// Middleware para leer JSON
 app.use(express.json());
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Telegram Expense Bot is running' });
-});
+// Health check endpoints
+app.get('/', (req, res) => res.json({ status: 'ok', message: 'Telegram Expense Bot is running' }));
+app.get('/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString() }));
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
-});
-
-// Bot configuration
+// Telegram Bot configuration
 const token = process.env.TELEGRAM_BOT_TOKEN;
+if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
 
-if (!token) {
-  throw new Error('TELEGRAM_BOT_TOKEN is required');
-}
-
-const bot = new TelegramBot(token);
+// No polling: bot solo usado en webhook
+const bot = new TelegramBot(token, { webHook: true });
 
 // Webhook endpoint
 app.post('/webhook', async (req, res) => {
   try {
     const update = req.body;
-    
+    console.log('Received update:', JSON.stringify(update, null, 2));
+
     if (update.message) {
       await processMessage(update.message);
     }
-    
-    res.status(200).json({ ok: true });
+
+    res.sendStatus(200);
   } catch (error) {
     console.error('Webhook error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.sendStatus(500);
   }
 });
 
-// Process message function
+// Función principal para procesar mensajes
 async function processMessage(msg) {
   const chatId = msg.chat.id;
   const text = msg.text;
-
   if (!text) return;
 
   try {
-    // Comando /start
+    // /start
     if (text === '/start') {
       await getOrCreateUser(msg.from);
       const welcomeMessage = `
@@ -66,7 +59,7 @@ async function processMessage(msg) {
 Soy tu asistente de gastos personales con clasificación automática.
 
 *Cómo registrar un gasto:*
-Simplemente envía un mensaje describiendo tu gasto:
+Envía un mensaje describiendo tu gasto:
 \`50 almuerzo en restaurante\`
 \`25.50 uber a casa tarjeta\`
 \`15 farmacia efectivo\`
@@ -82,7 +75,7 @@ Simplemente envía un mensaje describiendo tu gasto:
       return;
     }
 
-    // Comando /categorias
+    // /categorias
     if (text === '/categorias') {
       const categories = await getAllCategories();
       let message = '📂 *Categorías disponibles:*\n\n';
@@ -94,7 +87,7 @@ Simplemente envía un mensaje describiendo tu gasto:
       return;
     }
 
-    // Comando /metodos
+    // /metodos
     if (text === '/metodos') {
       const methods = await getPaymentMethods();
       let message = '💳 *Medios de pago disponibles:*\n\n';
@@ -106,23 +99,23 @@ Simplemente envía un mensaje describiendo tu gasto:
       return;
     }
 
-    // Comando /resumen
+    // /resumen
     if (text === '/resumen') {
       const user = await getOrCreateUser(msg.from);
       const now = new Date();
       const year = now.getFullYear();
       const month = now.getMonth() + 1;
-      
+
       const monthlyTotal = await getMonthlyTotal(user.id, year, month);
       const categoryTotals = await getCategoryTotals(user.id, year, month);
       const paymentMethodTotals = await getPaymentMethodTotals(user.id, year, month);
-      
+
       const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                          'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-      
+
       let message = `📊 *Resumen de ${monthNames[month - 1]} ${year}*\n\n`;
       message += `💰 Total: *${formatCurrency(monthlyTotal)}*\n\n`;
-      
+
       if (Object.keys(categoryTotals).length === 0) {
         message += 'No hay gastos registrados este mes.';
       } else {
@@ -130,27 +123,27 @@ Simplemente envía un mensaje describiendo tu gasto:
         for (const [category, total] of Object.entries(categoryTotals)) {
           message += `${category}: ${formatCurrency(total)}\n`;
         }
-        
+
         message += '\n*Por medio de pago:*\n';
         for (const [method, total] of Object.entries(paymentMethodTotals)) {
           message += `${method}: ${formatCurrency(total)}\n`;
         }
       }
-      
+
       await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
       return;
     }
 
-    // Comando /recientes
+    // /recientes
     if (text === '/recientes') {
       const user = await getOrCreateUser(msg.from);
       const expenses = await getRecentExpenses(user.id);
-      
+
       if (expenses.length === 0) {
         await bot.sendMessage(chatId, 'No tienes gastos registrados aún.');
         return;
       }
-      
+
       let message = '📋 *Últimos gastos:*\n\n';
       expenses.forEach(expense => {
         const icon = expense.categories?.icon || '📦';
@@ -160,12 +153,12 @@ Simplemente envía un mensaje describiendo tu gasto:
         const date = new Date(expense.expense_date).toLocaleDateString('es-ES');
         message += `${icon} ${formatCurrency(expense.amount)} - ${category}\n   ${expense.description}\n   ${paymentIcon} ${paymentMethod}\n   📅 ${date}\n\n`;
       });
-      
+
       await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
       return;
     }
 
-    // Comando /ayuda
+    // /ayuda
     if (text === '/ayuda') {
       const helpMessage = `
 📖 *Guía de uso*
@@ -188,34 +181,28 @@ Describe tu gasto con el monto y la descripción.
       return;
     }
 
-    // Procesar gasto (mensajes que no son comandos)
+    // Registrar gasto (mensajes sin /)
     if (!text.startsWith('/')) {
       const user = await getOrCreateUser(msg.from);
       const parsed = parseExpenseMessage(text);
-      
+
       if (!parsed.amount) {
         await bot.sendMessage(chatId, '❌ No detecté el monto.\n\nEjemplo: `50 almuerzo en restaurante`', { parse_mode: 'Markdown' });
         return;
       }
-      
-      // Clasificar automáticamente
+
       const category = await classifyExpense(parsed.description);
-      
       if (!category) {
         await bot.sendMessage(chatId, '❌ Error al clasificar el gasto. Intenta de nuevo.');
         return;
       }
-      
-      // Buscar método de pago si fue especificado
+
       let paymentMethodId = null;
       if (parsed.paymentMethod) {
         const paymentMethod = await findPaymentMethodByName(user.id, parsed.paymentMethod);
-        if (paymentMethod) {
-          paymentMethodId = paymentMethod.id;
-        }
+        if (paymentMethod) paymentMethodId = paymentMethod.id;
       }
-      
-      // Crear gasto
+
       const expense = await createExpense(
         user.id,
         category.id,
@@ -223,7 +210,7 @@ Describe tu gasto con el monto y la descripción.
         parsed.description,
         paymentMethodId
       );
-      
+
       const confirmationMessage = `
 ✅ *Gasto registrado*
 
@@ -233,16 +220,17 @@ ${category.icon} Categoría: ${category.name}
 ${paymentMethodId ? `💳 Medio de pago: Especificado` : '💳 Medio de pago: No especificado'}
 📅 Fecha: ${new Date(expense.expense_date).toLocaleDateString('es-ES')}
       `.trim();
-      
+
       await bot.sendMessage(chatId, confirmationMessage, { parse_mode: 'Markdown' });
     }
+
   } catch (error) {
     console.error('Error processing message:', error);
-    await bot.sendMessage(chatId, '❌ Error al procesar el gasto. Por favor intenta de nuevo.');
+    await bot.sendMessage(chatId, '❌ Error al procesar tu mensaje. Por favor intenta nuevamente.');
   }
 }
 
-// Start server
+// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`📡 Webhook ready at /webhook`);
