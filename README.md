@@ -8,8 +8,8 @@ Bot de Telegram para gestión de gastos personales con clasificación automátic
 2. Conecta tu repositorio con Vercel
 3. Configura las variables de entorno en Vercel:
    - `TELEGRAM_BOT_TOKEN`
-   - `Bolt Database_URL`
-   - `Bolt Database_SERVICE_ROLE_KEY`
+   - `Database_URL`
+   - `Database_SERVICE_ROLE_KEY`
 4. Deploy
 
 ## Configurar Webhook
