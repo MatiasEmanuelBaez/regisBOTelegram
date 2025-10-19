@@ -7,6 +7,7 @@ import { classifyPaymentMethod } from "../services/paymentMethodService.js";
  * "150.50 uber a casa tarjeta"
  * "30 farmacia efectivo"
  */
+
 export async function parseExpenseMessage(message) {
   if (!message || typeof message !== 'string') {
     return {
@@ -16,11 +17,12 @@ export async function parseExpenseMessage(message) {
     };
   }
 
-  // Separar palabras por espacios
-  const parts = message.trim().split(/\s+/);
+  const [mainPart, paymentPart] = message.split('.');
+  const parts = mainPart.trim().split(/\s+/);
 
   let amount = null;
   let description = [];
+  let paymentMethod = null;
 
   for (const part of parts) {
     // Limpiar cualquier carácter que no sea dígito, punto o coma
@@ -38,9 +40,8 @@ export async function parseExpenseMessage(message) {
   const descriptionText = description.join(' ') || 'Gasto sin descripción';
 
   // Detectar método de pago usando la función asíncrona
-  let paymentMethod = 'Efectivo';
   try {
-    const paymentMethodObj = await classifyPaymentMethod(descriptionText);
+    const paymentMethodObj = await classifyPaymentMethod(paymentPart);
     paymentMethod = paymentMethodObj?.name || 'Efectivo';
   } catch (error) {
     console.error('Error clasificando método de pago:', error);

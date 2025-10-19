@@ -1,9 +1,13 @@
 import { Database } from '../supabase.js';
+import { capitalizeSentence } from '../utils/helpers.js'
 
-export async function createExpense(userId, categoryId, amount, description, paymentMethodId = null, expenseDate = null) {
+export async function createExpense(userId, subcategoryId, amount, description, paymentMethodId = null, expenseDate = null) {
+
+  description = capitalizeSentence(description);
+
   const expenseData = {
     user_id: userId,
-    category_id: categoryId,
+    subcategory_id: subcategoryId,
     amount: parseFloat(amount),
     description,
     payment_method_id: paymentMethodId,

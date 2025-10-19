@@ -15,41 +15,6 @@ export async function getAllCategories() {
   return data;
 }
 
-// Clasificar automáticamente un gasto basado en su descripción
-export async function classifyExpense(description) {
-  const lowerDescription = description.toLowerCase();
-  
-  // Obtener todas las categorías con sus keywords
-  const { data: categories, error } = await Database
-    .from('categories')
-    .select('*');
-
-  if (error) {
-    console.error('Error fetching categories for classification:', error);
-    throw error;
-  }
-
-  // Buscar coincidencias con keywords
-  for (const category of categories) {
-    const keywords = category.keywords || [];
-    
-    for (const keyword of keywords) {
-      if (lowerDescription.includes(keyword.toLowerCase())) {
-        return category;
-      }
-    }
-  }
-
-  // Si no encuentra coincidencia, devolver "Otros"
-  const { data: otherCategory } = await Database
-    .from('categories')
-    .select('*')
-    .eq('name', 'Otros')
-    .maybeSingle();
-
-  return otherCategory;
-}
-
 // Buscar categoría por nombre (para cuando el usuario especifique una)
 export async function findCategoryByName(categoryName) {
   const { data, error } = await Database
@@ -64,4 +29,23 @@ export async function findCategoryByName(categoryName) {
   }
 
   return data;
+}
+
+// Función para obtener la categoría desde una subcategoría
+export async function getCategoryBySubcategory(subcategoryId) {
+  const { data, error } = await Database
+    .from('subcategories')
+    .select(`
+      *,
+      categories (*)
+    `)
+    .eq('id', subcategoryId)
+    .single();
+
+  if (error) {
+    console.error('Error getting category by subcategory:', error);
+    throw error;
+  }
+
+  return data.categories;
 }

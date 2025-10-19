@@ -1,8 +1,9 @@
 import express from 'express';
 import TelegramBot from 'node-telegram-bot-api';
-import dotenv from 'dotenv';
+import dotenv, { parse } from 'dotenv';
 import { getOrCreateUser } from './src/services/userService.js';
-import { getAllCategories, classifyExpense } from './src/services/categoryService.js';
+import { getAllCategories, getCategoryBySubcategory } from './src/services/categoryService.js';
+import { getAllSubcategories, classifyExpense } from './src/services/subcategoryService.js';
 import { getPaymentMethods, findPaymentMethodByName } from './src/services/paymentMethodService.js';
 import { createExpense, getRecentExpenses, getMonthlyTotal, getCategoryTotals, getPaymentMethodTotals } from './src/services/expenseService.js';
 import { parseExpenseMessage, formatCurrency } from './src/utils/parser.js';
@@ -58,26 +59,35 @@ async function processMessage(msg) {
 
   try {
     // Comando /start
-    if (text === '/start') {
+    if (text === '/inicio') {
       await getOrCreateUser(msg.from);
-      const welcomeMessage = `
-¡Hola ${msg.from.first_name}! 👋
+      const welcomeMessage = 
+`
+👋 *Hola ${msg.from.first_name}!*
 
-Soy tu asistente de gastos personales con clasificación automática.
+Soy *Mammón*, tu asistente para llevar el control de tus gastos.
+Estoy aquí para ayudarte a registrar tus movimientos de forma rápida y sencilla, solo con un mensaje.
+Puedo clasificar tus gastos automáticamente y mostrarte en qué se te va el dinero.
 
-*Cómo registrar un gasto:*
-Simplemente envía un mensaje describiendo tu gasto:
-\`50 almuerzo en restaurante\`
-\`25.50 uber a casa tarjeta\`
-\`15 farmacia efectivo\`
+💡 *Cómo registrar un gasto:*
+Escribe el importe, una breve descripción y, si querés, la forma de pago después de un punto. Yo me encargo del resto.
+Ejemplos:
+  \`50 almuerzo en restaurante\`
+  \`25.50 uber a casa. Efectivo\`
+  \`15 farmacia. Tarjeta\`
 
-*Comandos disponibles:*
-/categorias - Ver todas las categorías
-/metodos - Ver tus medios de pago
-/resumen - Ver resumen del mes actual
-/recientes - Ver últimos 10 gastos
-/ayuda - Ver ayuda detallada
-      `.trim();
+⚙️ *Comandos disponibles:*
+/recientes - Te muestro los últimos 10 gastos registrados
+/resumen - Todos los gastos clasificados por categoría o método de pago
+/metodos - Lista de métodos de pago disponibles
+/categorias - Lista de categorías disponibles
+/subcategorias - Lista de subcategorías disponibles
+/buscar [palabra o monto] - Encuentra un gasto específico
+/balance - Total gastado y resumen del mes
+/borrar [ID o palabra] - Elimina un gasto registrados
+/ayuda - Consultas frecuentes y soporte
+      
+`.trim();
       await bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
       return;
     }
@@ -88,6 +98,18 @@ Simplemente envía un mensaje describiendo tu gasto:
       let message = '📂 *Categorías disponibles:*\n\n';
       categories.forEach(cat => {
         message += `${cat.icon} ${cat.name}\n`;
+      });
+      message += '\n💡 El bot clasificará automáticamente tus gastos.';
+      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      return;
+    }
+
+    // Comando /subcategorias
+    if (text === '/subcategorias') {
+      const subcategories = await getAllSubcategories();
+      let message = '📂 *Subcategorías disponibles:*\n\n';
+      subcategories.forEach(cat => {
+        message += `${cat.name}\n`;
       });
       message += '\n💡 El bot clasificará automáticamente tus gastos.';
       await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -167,23 +189,30 @@ Simplemente envía un mensaje describiendo tu gasto:
 
     // Comando /ayuda
     if (text === '/ayuda') {
-      const helpMessage = `
-📖 *Guía de uso*
+      const helpMessage = 
+`
+❓ Centro de ayuda de *Mammón*
+Si necesitas una mano para usarme, te dejo una guía rápida con todo lo que podemos hacer juntos.
 
-*Registrar un gasto:*
-Describe tu gasto con el monto y la descripción.
+💡 Registrar un gasto:
+Solo escribí el importe, una breve descripción y, si querés, la forma de pago después de un punto.
+Ejemplos:
+  \`50 almuerzo en restaurante\`
+  \`25.50 uber a casa. Efectivo\`
+  \`15 farmacia. Tarjeta\`
 
-*Formatos válidos:*
-✅ \`50 almuerzo restaurante\`
-✅ \`25.50 uber casa tarjeta\`
-✅ \`15 farmacia paracetamol efectivo\`
+🧠 Consejos rápidos:
+Podés escribir los montos con o sin decimales.
+Si no indicás un método de pago, lo guardaré automáticamente como “Efectivo”.
+Podés pedirme tus gastos recientes, un resumen o buscar algo específico con los comandos disponibles.
 
-*Comandos:*
-/categorias - Ver categorías
-/metodos - Ver medios de pago
-/resumen - Resumen del mes
-/recientes - Últimos 10 gastos
-      `.trim();
+💖 Apoyá el proyecto:
+Si querés ayudarme a seguir creciendo y mejorando, podés hacerlo a través de...
+
+📩 ¿Tienes dudas o algo no funciona bien?
+Podés comunicarte con mi creador: @unpeladoconpelo
+
+`.trim();
       await bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
       return;
     }
@@ -191,25 +220,27 @@ Describe tu gasto con el monto y la descripción.
     // Procesar gasto (mensajes que no son comandos)
     if (!text.startsWith('/')) {
       const user = await getOrCreateUser(msg.from);
-      const parsed = parseExpenseMessage(text);
-      
+      const parsed = await parseExpenseMessage(text);
+
       if (!parsed.amount) {
-        await bot.sendMessage(chatId, '❌ No detecté el monto.\n\nEjemplo: `50 almuerzo en restaurante`', { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, '🔴 No detecté el monto.\n\nEjemplo: `50 almuerzo en restaurante`', { parse_mode: 'Markdown' });
         return;
       }
       
       // Clasificar automáticamente
-      const category = await classifyExpense(parsed.description);
+      const subcategory = await classifyExpense(parsed.description);
       
-      if (!category) {
-        await bot.sendMessage(chatId, '❌ Error al clasificar el gasto. Intenta de nuevo.');
+      if (!subcategory) {
+        await bot.sendMessage(chatId, '🔴 Error al clasificar el gasto. Intenta de nuevo.');
         return;
       }
+
+      const category = await getCategoryBySubcategory(subcategory.id);
       
       // Buscar método de pago si fue especificado
       let paymentMethodId = null;
       if (parsed.paymentMethod) {
-        const paymentMethod = await findPaymentMethodByName(user.id, parsed.paymentMethod);
+        const paymentMethod = await findPaymentMethodByName(parsed.paymentMethod);
         if (paymentMethod) {
           paymentMethodId = paymentMethod.id;
         }
@@ -218,27 +249,26 @@ Describe tu gasto con el monto y la descripción.
       // Crear gasto
       const expense = await createExpense(
         user.id,
-        category.id,
+        subcategory.id,
         parsed.amount,
         parsed.description,
         paymentMethodId
       );
-      
-      const confirmationMessage = `
-✅ *Gasto registrado*
 
-${category.icon} Categoría: ${category.name}
-💰 Monto: ${formatCurrency(expense.amount)}
-📝 Descripción: ${expense.description}
-${paymentMethodId ? `💳 Medio de pago: Especificado` : '💳 Medio de pago: No especificado'}
-📅 Fecha: ${new Date(expense.expense_date).toLocaleDateString('es-ES')}
-      `.trim();
-      
+      const confirmationMessage = 
+`
+🟢 *Registrado*
+📅 ${new Date(expense.expense_date).toLocaleDateString('es-ES')}
+${category.icon} ${category.name} > ${subcategory.name}
+💰 *${formatCurrency(expense.amount)}* · ${expense.description}
+${paymentMethodId ? `💳 Pago con ${parsed.paymentMethod.toLowerCase()}` : '💳 Pago no definido'}
+`.trim();
+
       await bot.sendMessage(chatId, confirmationMessage, { parse_mode: 'Markdown' });
     }
   } catch (error) {
     console.error('Error processing message:', error);
-    await bot.sendMessage(chatId, '❌ Error al procesar el gasto. Por favor intenta de nuevo.');
+    await bot.sendMessage(chatId, '🔴 Error al procesar el gasto. Por favor intenta de nuevo.');
   }
 }
 
