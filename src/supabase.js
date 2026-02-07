@@ -3,8 +3,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const DatabaseUrl = process.env.Database_URL;
-const DatabaseKey = process.env.Database_SERVICE_ROLE_KEY;
+const DatabaseUrl = process.env.SUPABASE_URL;
+const DatabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!DatabaseUrl || !DatabaseKey) {
   throw new Error('Missing Database credentials');
