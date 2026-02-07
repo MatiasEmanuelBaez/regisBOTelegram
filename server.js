@@ -3,10 +3,13 @@ import TelegramBot from 'node-telegram-bot-api';
 import dotenv, { parse } from 'dotenv';
 import { getOrCreateUser } from './src/services/userService.js';
 import { getAllCategories, getCategoryBySubcategory } from './src/services/categoryService.js';
-import { getAllSubcategories, classifyExpense } from './src/services/subcategoryService.js';
+import { getAllSubcategories, findSubcategoryByName } from './src/services/subcategoryService.js';
 import { getPaymentMethods, findPaymentMethodByName } from './src/services/paymentMethodService.js';
 import { createExpense, getRecentExpenses, getMonthlyTotal, getCategoryTotals, getPaymentMethodTotals } from './src/services/expenseService.js';
 import { parseExpenseMessage, formatCurrency } from './src/utils/parser.js';
+import { classifyExpense } from './src/utils/classifier.js';
+import { classifyExpense as classifyExpenseDB } from './src/services/subcategoryService.js';
+import { Database } from './src/supabase.js';
 
 dotenv.config();
 
@@ -85,6 +88,7 @@ Ejemplos:
 /buscar [palabra o monto] - Encuentra un gasto específico
 /balance - Total gastado y resumen del mes
 /borrar [ID o palabra] - Elimina un gasto registrados
+/vincular [email] - Vincular tu cuenta web para ver estadísticas
 /ayuda - Consultas frecuentes y soporte
       
 `.trim();
@@ -217,6 +221,45 @@ Podés comunicarte con mi creador: @unpeladoconpelo
       return;
     }
 
+    // Comando /vincular
+    if (text.startsWith('/vincular')) {
+      const email = text.split(' ')[1]?.trim();
+      if (!email || !email.includes('@')) {
+        await bot.sendMessage(chatId, 'Uso: `/vincular tu@email.com`\n\nPrimero registrate en la web y luego usa este comando para vincular tu cuenta.', { parse_mode: 'Markdown' });
+        return;
+      }
+
+      const user = await getOrCreateUser(msg.from);
+
+      // Buscar el usuario de auth por email
+      const { data: { users: authUsers }, error: authError } = await Database.auth.admin.listUsers();
+      if (authError) {
+        await bot.sendMessage(chatId, '🔴 Error al buscar la cuenta. Intenta de nuevo.');
+        return;
+      }
+
+      const authUser = authUsers?.find(u => u.email === email);
+      if (!authUser) {
+        await bot.sendMessage(chatId, '🔴 No se encontro una cuenta web con ese email. Registrate primero en la web.');
+        return;
+      }
+
+      // Vincular cuentas
+      const { error: updateError } = await Database
+        .from('users')
+        .update({ email, auth_id: authUser.id })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('Error vinculando cuenta:', updateError);
+        await bot.sendMessage(chatId, '🔴 Error al vincular. Puede que ese email ya este vinculado a otra cuenta.');
+        return;
+      }
+
+      await bot.sendMessage(chatId, '🟢 *Cuenta vinculada exitosamente!*\n\nYa podes ver tus gastos y estadísticas en la web.', { parse_mode: 'Markdown' });
+      return;
+    }
+
     // Procesar gasto (mensajes que no son comandos)
     if (!text.startsWith('/')) {
       const user = await getOrCreateUser(msg.from);
@@ -227,11 +270,22 @@ Podés comunicarte con mi creador: @unpeladoconpelo
         return;
       }
       
-      // Clasificar automáticamente
-      const subcategory = await classifyExpense(parsed.description);
-      
+      // Clasificar automáticamente (scoring por similitud → fallback DB → "Otros")
+      let subcategory = null;
+
+      // Tier 1: Clasificación por scoring de keywords locales
+      const subcategoryName = classifyExpense(parsed.description);
+      if (subcategoryName) {
+        subcategory = await findSubcategoryByName(subcategoryName);
+      }
+
+      // Tier 2: Fallback a búsqueda por keywords en base de datos
       if (!subcategory) {
-        await bot.sendMessage(chatId, '🔴 Error al clasificar el gasto. Intenta de nuevo.');
+        subcategory = await classifyExpenseDB(parsed.description);
+      }
+
+      if (!subcategory) {
+        await bot.sendMessage(chatId, '🔴 No pude clasificar el gasto. Intenta con una descripción más detallada.');
         return;
       }
 
