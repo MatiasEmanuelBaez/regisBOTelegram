@@ -84,3 +84,27 @@ export async function getSubcategoryWithCategory(subcategoryId) {
 
   return data;
 }
+
+export async function getAllSubcategoriesWithKeywords() {
+  const result = await Database
+    .from('subcategories')
+    .select('*');
+  
+  // Si result es un objeto que contiene un array en alguna propiedad
+  const dataArray = result.data || result.rows || result.result || result;
+  
+  if (!Array.isArray(dataArray)) {
+    console.error('Expected array but got:', typeof dataArray, dataArray);
+    return [];
+  }
+
+  return dataArray.map(row => ({
+    id: row.id,
+    name: row.name,
+    keywords: Array.isArray(row.keywords)
+      ? row.keywords
+      : (typeof row.keywords === 'string'
+          ? row.keywords.split(',').map(k => k.trim())
+          : [])
+  }));
+}
